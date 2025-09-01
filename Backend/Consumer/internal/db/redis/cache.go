@@ -12,8 +12,13 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
+type RedisComander interface {
+	Set(ctx context.Context, key string, value interface{}, expiration time.Duration) *redis.StatusCmd
+	Get(ctx context.Context, key string) *redis.StringCmd
+}
+
 type CacheStorage struct {
-	rediscache *redis.Client
+	rediscache RedisComander
 }
 
 type CacheManager interface {
@@ -21,7 +26,7 @@ type CacheManager interface {
 	GetOrderByID(ctx context.Context, orderID string) (models.Order, error)
 }
 
-func NewCacheStorage(redisConn *redis.Client) *CacheStorage {
+func NewCacheStorage(redisConn RedisComander) *CacheStorage {
 	return &CacheStorage{
 		rediscache: redisConn,
 	}
