@@ -54,7 +54,7 @@ func (k KafkaProducer) Send(order models.Order) error {
 
 	msg, err := json.Marshal(order)
 	if err != nil {
-		return fmt.Errorf("cannot marshal order %v", err)
+		return fmt.Errorf("cannot marshal order %w", err)
 	}
 	return k.Writer.WriteMessages(context.Background(),
 		kafka.Message{

@@ -6,15 +6,18 @@ import (
 
 	"github.com/LootNex/OrderService/Consumer/internal/service"
 	"github.com/gorilla/mux"
+	"go.uber.org/zap"
 )
 
 type Handler struct {
 	Serv service.ServiceManager
+	log  *zap.Logger
 }
 
-func NewHandler(serv service.ServiceManager) *Handler {
+func NewHandler(serv service.ServiceManager, logg *zap.Logger) *Handler {
 	return &Handler{
 		Serv: serv,
+		log:  logg,
 	}
 }
 
@@ -42,7 +45,9 @@ func (h Handler) GetOrder(w http.ResponseWriter, r *http.Request) {
 
 	order, err := h.Serv.GetOrderByID(ctx, orderID)
 	if err != nil {
+		h.log.Warn("order not found", zap.String("order_id", orderID), zap.Error(err))
 		http.Error(w, "no such orderID", http.StatusBadRequest)
+		return
 	}
 
 	resp, err := json.MarshalIndent(order, "", "   ")
@@ -51,6 +56,8 @@ func (h Handler) GetOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Write(resp)
+	if _, err := w.Write(resp); err != nil {
+		h.log.Error("failed to write response", zap.Error(err))
+	}
 
 }

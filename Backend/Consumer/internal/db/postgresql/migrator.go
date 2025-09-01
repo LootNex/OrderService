@@ -2,6 +2,7 @@ package postgresql
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -10,25 +11,25 @@ import (
 	"go.uber.org/zap"
 )
 
-func RunMigrations(db *sql.DB, logger *zap.Logger) error {
+func RunMigrations(db *sql.DB, log *zap.Logger) error {
 
 	driver, err := postgres.WithInstance(db, &postgres.Config{})
 	if err != nil {
-		return fmt.Errorf("failed to create migration driver: %v", err)
+		return fmt.Errorf("failed to create migration driver: %w", err)
 	}
 
 	m, err := migrate.NewWithDatabaseInstance(
 		"file://internal/db/postgresql/migrations",
 		"postgres", driver)
 	if err != nil {
-		return fmt.Errorf("failed to create migrate instance: %v", err)
+		return fmt.Errorf("failed to create migrate instance: %w", err)
 	}
 
-	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
-		return fmt.Errorf("migration failed: %v", err)
+	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		return fmt.Errorf("migration failed: %w", err)
 	}
 
-	logger.Info("Migrations applied successfully")
+	log.Info("Migrations applied successfully")
 	return nil
 
 }

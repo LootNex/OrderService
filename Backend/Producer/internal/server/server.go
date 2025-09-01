@@ -7,6 +7,7 @@ import (
 	"github.com/LootNex/OrderService/Producer/configs"
 	"github.com/LootNex/OrderService/Producer/internal/kafka"
 	"github.com/LootNex/OrderService/Producer/internal/models"
+	"github.com/brianvoe/gofakeit/v7"
 )
 
 func StartServer() error {
@@ -26,56 +27,58 @@ func StartServer() error {
 	producer := kafka.NewKafkaProducer(config.Kafka.Brokers, config.Kafka.Topic)
 	defer producer.Writer.Close()
 
-	time.Sleep(5 * time.Second)
+	if err = gofakeit.Seed(time.Now().UnixNano()); err != nil {
+		return fmt.Errorf("cannot run gofakeit err:%w", err)
+	}
 
 	for i := 1; i <= 10; i++ {
 		order := models.Order{
-			OrderUID:    fmt.Sprintf("b563feb7b2b84b6test%d", i),
-			TrackNumber: fmt.Sprintf("WBILMTESTTRACK%d", i),
+			OrderUID:    gofakeit.UUID(),
+			TrackNumber: gofakeit.Regex("[A-Z0-9]{10}"),
 			Entry:       "WBIL",
 			Delivery: models.Delivery{
-				Name:    "Test Testov",
-				Phone:   "+9720000000",
-				Zip:     "2639809",
-				City:    "Kiryat Mozkin",
-				Address: "Ploshad Mira 15",
-				Region:  "Kraiot",
-				Email:   "test@gmail.com",
+				Name:    gofakeit.Name(),
+				Phone:   gofakeit.Phone(),
+				Zip:     gofakeit.Zip(),
+				City:    gofakeit.City(),
+				Address: gofakeit.Street(),
+				Region:  gofakeit.State(),
+				Email:   gofakeit.Email(),
 			},
 			Payment: models.Payment{
-				Transaction:  fmt.Sprintf("b563feb7b2b84b6test%d", i),
-				Currency:     "USD",
+				Transaction:  gofakeit.UUID(),
+				Currency:     gofakeit.CurrencyShort(),
 				Provider:     "wbpay",
-				Amount:       1817,
-				PaymentDT:    1637907727,
-				Bank:         "alpha",
-				DeliveryCost: 1500,
-				GoodsTotal:   317,
+				Amount:       int(gofakeit.Price(100, 5000)),
+				PaymentDT:    time.Now().Unix(),
+				Bank:         gofakeit.Company(),
+				DeliveryCost: gofakeit.Number(100, 2000),
+				GoodsTotal:   gofakeit.Number(100, 2000),
 				CustomFee:    0,
 			},
 			Items: []models.Item{
 				{
-					ChrtID:      9934930 + i,
-					TrackNumber: fmt.Sprintf("WBILMTESTTRACK%d", i),
-					Price:       453,
-					RID:         fmt.Sprintf("ab4219087a764ae0btest%d", i),
-					Name:        "Mascaras",
-					Sale:        30,
-					Size:        "0",
-					TotalPrice:  317,
-					NmID:        2389212,
-					Brand:       "Vivienne Sabo",
+					ChrtID:      gofakeit.Number(1000000, 9999999),
+					TrackNumber: gofakeit.LetterN(12),
+					Price:       gofakeit.Number(100, 1000),
+					RID:         gofakeit.UUID(),
+					Name:        gofakeit.ProductName(),
+					Sale:        gofakeit.Number(0, 50),
+					Size:        gofakeit.RandomString([]string{"S", "M", "L"}),
+					TotalPrice:  gofakeit.Number(100, 2000),
+					NmID:        gofakeit.Number(100000, 999999),
+					Brand:       gofakeit.Company(),
 					Status:      202,
 				},
 			},
 			Locale:            "en",
 			InternalSignature: "",
-			CustomerID:        "test",
-			DeliveryService:   "meest",
-			ShardKey:          "9",
-			SmID:              99,
-			DateCreated:       "2021-11-26T06:22:19Z",
-			OofShard:          "1",
+			CustomerID:        gofakeit.Username(),
+			DeliveryService:   gofakeit.Company(),
+			ShardKey:          fmt.Sprintf("%d", gofakeit.Number(1, 10)),
+			SmID:              gofakeit.Number(1, 1000),
+			DateCreated:       time.Now().Format(time.RFC3339),
+			OofShard:          fmt.Sprintf("%d", gofakeit.Number(1, 5)),
 		}
 
 		err := producer.Send(order)

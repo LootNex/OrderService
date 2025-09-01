@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -9,20 +10,23 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/LootNex/OrderService/Consumer/configs"
-	"github.com/LootNex/OrderService/Consumer/internal/cache"
+	config "github.com/LootNex/OrderService/Consumer/configs"
 	"github.com/LootNex/OrderService/Consumer/internal/db/postgresql"
+	"github.com/LootNex/OrderService/Consumer/internal/db/redis"
 	"github.com/LootNex/OrderService/Consumer/internal/handlers"
 	"github.com/LootNex/OrderService/Consumer/internal/kafka/consumer"
 	"github.com/LootNex/OrderService/Consumer/internal/logger"
-	"github.com/LootNex/OrderService/Consumer/internal/repository"
 	"github.com/LootNex/OrderService/Consumer/internal/service"
 	"github.com/gorilla/mux"
+	"go.uber.org/zap"
 )
 
 func StartServer() error {
 
-	logger, err := logger.InitLogger()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	log, err := logger.InitLogger()
 	if err != nil {
 		return err
 	}
@@ -32,52 +36,65 @@ func StartServer() error {
 		return err
 	}
 
-	postg, err := postgresql.InitPosgres(cfg, logger)
+	PgConn, err := postgresql.InitPostgres(cfg, log)
 	if err != nil {
 		return err
 	}
 
-	pgstorage := repository.NewPGStorage(postg)
-	cache := cache.NewCacheStorage()
-	serv := service.NewOrderService(pgstorage, cache)
-	handler := handlers.NewHandler(serv)
+	RedisConn, err := redis.InitRedis(ctx, cfg)
+	if err != nil {
+		return err
+	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	pgstorage := postgresql.NewPGStorage(PgConn, log)
+	CacheStorage := redis.NewCacheStorage(RedisConn)
+	serv := service.NewOrderService(pgstorage, CacheStorage, log)
+	OrderHandler := handlers.NewHandler(serv, log)
 
-	go serv.LoadCache(ctx)
-	go consumer.StartConsumer(ctx, cfg.Kafka.Topic, cfg.Kafka.Brokers, serv, logger)
+	if err = serv.LoadCache(ctx); err != nil {
+		return fmt.Errorf("cannot load cache: %w", err)
+	}
+
+	go consumer.StartConsumer(ctx, cfg.Kafka.Topic, cfg.Kafka.Brokers, serv, log)
 
 	r := mux.NewRouter()
 
-	server := http.Server{
+	HttpServer := http.Server{
 		Addr:    ":" + cfg.Server.Port,
 		Handler: handlers.CORS(r),
 	}
 
-	r.HandleFunc("/order/{id}", handler.GetOrder).Methods("GET")
+	r.HandleFunc("/order/{id}", OrderHandler.GetOrder).Methods("GET")
 
 	go func() {
 
-		logger.Info("server running on port" + cfg.Server.Port)
+		log.Info("server running on port" + cfg.Server.Port)
 
-		if err := server.ListenAndServe(); err != nil {
-			logger.Fatal(fmt.Sprintf("cannot start http server err:%v", err))
+		if err := HttpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("cannot start http server err:%v", zap.Error(err))
 			stop()
 		}
 	}()
 
 	<-ctx.Done()
 
-	logger.Info("shutting down gracefully...")
+	log.Info("shutting down gracefully...")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("cannot stop server err:%v", err)
+	if err := HttpServer.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("cannot stop server err:%w", err)
 	}
 
-	logger.Info("Server stopped")
+	if err := PgConn.Close(); err != nil {
+		log.Error("cannot close postgres", zap.Error(err))
+	}
+	if err := RedisConn.Close(); err != nil {
+		log.Error("cannot close redis", zap.Error(err))
+	}
+
+	log.Info("Server stopped")
 	return nil
 
 }

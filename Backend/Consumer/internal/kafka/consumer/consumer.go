@@ -3,7 +3,6 @@ package consumer
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 
 	"github.com/LootNex/OrderService/Consumer/internal/models"
 	"github.com/LootNex/OrderService/Consumer/internal/service"
@@ -11,7 +10,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func StartConsumer(ctx context.Context, topic string, brokers []string, serv service.ServiceManager, logger *zap.Logger) {
+func StartConsumer(ctx context.Context, topic string, brokers []string, serv service.ServiceManager, log *zap.Logger) {
 	r := kafka.NewReader(kafka.ReaderConfig{
 		Brokers:     brokers,
 		Topic:       topic,
@@ -20,34 +19,44 @@ func StartConsumer(ctx context.Context, topic string, brokers []string, serv ser
 		MinBytes:    10e3,
 		MaxBytes:    10e6,
 	})
-	defer r.Close()
+	defer func() {
+		if err := r.Close(); err != nil {
+			log.Error("failed to close Kafka reader", zap.Error(err))
+		}
+	}()
 
-	logger.Info("Kafka consumer started")
+	log.Info("Kafka consumer started")
 
 	for {
-		msg, err := r.ReadMessage(ctx)
-		if err != nil {
-			logger.Warn(fmt.Sprintf("Ошибка чтения из Kafka: %v", err))
-			continue
+		select {
+		case <-ctx.Done():
+			log.Info("Kafka consumer stopping gracefully...")
+			return
+		default:
+			msg, err := r.ReadMessage(ctx)
+			if err != nil {
+				log.Warn("Ошибка чтения из Kafka", zap.Error(err))
+				continue
+			}
+
+			var order models.Order
+
+			if err := json.Unmarshal(msg.Value, &order); err != nil {
+				log.Warn("Ошибка парсинга JSON", zap.Error(err))
+				continue
+			}
+
+			if err := serv.SaveNewOrder(ctx, &order); err != nil {
+				log.Warn("Ошибка сохранения заказа", zap.Error(err))
+
+			} else {
+				if err = r.CommitMessages(ctx, msg); err != nil {
+					log.Error("error commit message err", zap.Error(err))
+				}
+
+				log.Info("GET ORDER", zap.String("order_uid", order.OrderUID))
+
+			}
 		}
-
-		var order models.Order
-
-		if err := json.Unmarshal(msg.Value, &order); err != nil {
-			logger.Warn(fmt.Sprintf("Ошибка парсинга JSON: %v", err))
-			continue
-		}
-
-		if err := serv.SaveNewOrder(ctx, order); err != nil {
-			logger.Warn(fmt.Sprintf("Ошибка сохранения заказа: %v", err))
-
-		} else {
-			logger.Info(fmt.Sprintf("Заказ %s обработан", order.OrderUID))
-			r.CommitMessages(ctx, msg)
-
-			logger.Info(fmt.Sprintf("GET ORDER: %s", order.OrderUID))
-
-		}
-
 	}
 }

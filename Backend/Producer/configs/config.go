@@ -18,12 +18,12 @@ func InitConfig() (*Config, error) {
 	viper.SetConfigFile("/ProducerRoot/configs/config.yaml")
 
 	if err := viper.ReadInConfig(); err != nil {
-		return nil, fmt.Errorf("error read in config err: %v", err)
+		return nil, fmt.Errorf("error read in config err: %w", err)
 	}
 
 	var cfg Config
 	if err := viper.Unmarshal(&cfg); err != nil {
-		return nil, fmt.Errorf("cannot unmarshal config err: %v", err)
+		return nil, fmt.Errorf("cannot unmarshal config err: %w", err)
 	}
 
 	return &cfg, nil
